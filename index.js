@@ -3,38 +3,31 @@ const cors = require('cors');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Hum body se bade data (image) le sakein, isliye limit badha di hai
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
-app.use(express.json());
 
-// ### CHANGE 1: Using a more reliable, official AI model ###
-const API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0";
+// Yeh naya AI model image ko modify karne ke liye best hai
+const IMAGE_TO_IMAGE_API_URL = "https://api-inference.huggingface.co/models/timbrooks/instruct-pix2pix";
+const TEXT_TO_IMAGE_API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0";
 const HF_TOKEN = process.env.HF_TOKEN;
 
 app.get('/', (req, res) => {
-  res.send('ImaginAI Backend is alive! Version 2.0');
+  res.send('ImaginAI Backend v2 is alive and ready!');
 });
-
-// ### CHANGE 2: A special test function for us ###
-app.get('/check-token', (req, res) => {
-    if (HF_TOKEN && HF_TOKEN.startsWith('hf_')) {
-        res.status(200).json({ status: "SUCCESS", message: "HF_TOKEN is configured correctly on the server." });
-    } else {
-        res.status(500).json({ status: "ERROR", message: "HF_TOKEN is missing or invalid on the server." });
-    }
-});
-
 
 app.post('/generate-image', async (req, res) => {
-  console.log("Request received...");
-  const { prompt } = req.body;
+  const { prompt, image } = req.body; // Ab hum image bhi le rahe hain
 
   if (!prompt) {
     return res.status(400).json({ error: 'Prompt is required.' });
   }
+  
+  const API_URL = image ? IMAGE_TO_IMAGE_API_URL : TEXT_TO_IMAGE_API_URL;
+  console.log(`Request received. Using model: ${API_URL}`);
 
-  if (!HF_TOKEN) {
-      return res.status(500).json({ error: 'Server configuration error: Hugging Face token is missing.' });
-  }
+  // Agar image hai, to use prompt ke saath bhejein. Agar nahi, to sirf prompt.
+  const payload = image ? { inputs: prompt, image: image.split(',')[1] } : { inputs: prompt };
 
   try {
     const response = await fetch(API_URL, {
@@ -43,16 +36,14 @@ app.post('/generate-image', async (req, res) => {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${HF_TOKEN}`
       },
-      body: JSON.stringify({ inputs: prompt }),
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-        const errorText = await response.text();
-        if(response.status === 503) {
+        if (response.status === 503) {
             return res.status(503).json({ error: 'AI model is waking up, please try again in about 30 seconds.' });
         }
-      // Return the actual error from Hugging Face for better debugging
-      return res.status(response.status).json({ error: `AI API Error: ${errorText}` });
+      throw new Error(`AI API Error: ${await response.text()}`);
     }
 
     const imageBuffer = await response.arrayBuffer();
@@ -64,7 +55,7 @@ app.post('/generate-image', async (req, res) => {
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Sorry, the server encountered a critical error.' });
+    res.status(500).json({ error: 'Sorry, the server encountered an error.' });
   }
 });
 
